@@ -1,108 +1,156 @@
-## LangChain SQL Agent for dynamic data visualization 
+# 智能SQL查询助手 🤖
 
-Example application for the construction and inference of an LLM-based LangChain SQL Agent that can dynamically query a database and invoke multiple visualization tools.
-The language model used is OpenAIs [GPT-4o mini](https://openai.com/index/gpt-4o-mini-advancing-cost-efficient-intelligence/).
+基于 LangChain + SiliconFlow LLM 的自然语言转SQL查询工具，支持中文问答、自动可视化。
 
-For this, four datasets from the [European Statistical Office](https://ec.europa.eu/eurostat/databrowser/explore/all/all_themes) (Eurostat) are loaded into a local SQL database that the LLM can query for up to 15 iterations per run. It can then use the results to independently call and output one of three basic visualizations functions based on Plotly.
+用户输入自然语言问题 → AI自动生成SQL → 执行查询 → 返回结果 + Plotly图表
 
-The four datasets are all sourced from the _Health determinants_ part of Eurostats public dataset API and include statistics on:
-- **tobacco consumption** by country of citizenship for the years 2014 and 2019 ([Link](https://ec.europa.eu/eurostat/databrowser/view/hlth_ehis_sk1c/default/table?lang=en))
-- **body mass index** (BMI) by country of citizenship for the years 2014 and 2019 ([Link](https://ec.europa.eu/eurostat/databrowser/view/hlth_ehis_bm1c/default/table?lang=en))
-- **physical exercise** by country of citizenship for the years 2014 and 2019 ([Link](https://ec.europa.eu/eurostat/databrowser/view/hlth_ehis_pe9c/default/table?lang=en))
-- **alcohol consumption** by country of citizenship for the years 2014 and 2019 ([Link](https://ec.europa.eu/eurostat/databrowser/view/hlth_ehis_al1c/default/table?lang=en))
+## ✨ 功能特性
 
-The LLM agent can use the following three tool functions to visualize the results (see [agent_tools.py](https://github.com/EliasK93/LangChain-SQL-Agent-for-dynamic-data-visualization/blob/master/agent_tools.py)):
-- **output_table()**: output 2D table contents as a pretty table using Plotly table viewer
-- **output_bar_plot()**: output a simple bar plot
-- **output_time_series_plot()**: output one or multiple line plots along one main time axis
+- **自然语言转SQL**：用中文描述需求，自动生成SQL查询语句
+- **智能可视化**：根据数据类型自动选择柱状图/折线图/饼图/表格
+- **多表关联查询**：支持跨表JOIN、子查询等复杂SQL操作
+- **对话式交互**：支持多轮对话，上下文记忆
+- **数据库探索**：自动展示表结构，帮助理解数据
+- **多模型支持**：支持Qwen、DeepSeek等多种LLM
 
-<br>
+## 🏗️ 技术架构
 
+```
+用户输入 (自然语言)
+    │
+    ▼
+┌─────────────────────┐
+│   Streamlit 前端     │
+│   (app.py)          │
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│  LangChain Agent    │
+│  ┌───────────────┐  │
+│  │ Prompt 模板    │  │    ┌──────────────┐
+│  │ (中文优化)     │──┼───▶│ SiliconFlow  │
+│  └───────────────┘  │    │ LLM (Qwen3)  │
+│  ┌───────────────┐  │    └──────────────┘
+│  │ SQL 工具       │  │
+│  │ 可视化工具     │  │
+│  └───────────────┘  │
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│  SQLite / MySQL     │
+│  (电商演示数据)      │
+└─────────────────────┘
+```
 
-### Example Results
+## 📊 演示数据库
 
-<table>
-    <thead>
-        <tr>
-            <th>User Input</th>
-            <th>Agent Output</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td>Show me the change in the percentage points of daily smokers between 2014 and 2019 for Germany, Denmark, Poland and Austria in a pretty table (one row per country).</td>
-            <td>
-                <strong>Plotly Figure:</strong><br><br>
-                <img src="imgs/result-query1.png" alt="imgs/result-query1.png" />
-                <hr>
-                <strong>Main SQL query used by the LLM:</strong><br><br>
-                <pre><code>SELECT "country (ISO-639-1)", "daily smoker"
-FROM smoking_of_tobacco_products
-WHERE year IN ('2014', '2019')
-AND "country (ISO-639-1)" IN ('DE', 'DK', 'PL', 'AT');</code></pre>
-            </td>
-        </tr>
-        <tr>
-            <td>Plot the percentage of people who are obese in Germany, Denmark, Estonia, Finland, Poland and Austria as a time series (one series per country).</td>
-            <td>
-                <strong>Plotly Figure:</strong><br><br>
-                <img src="imgs/result-query2.png" alt="imgs/result-query2.png" />
-                <hr>
-                <strong>Main SQL query used by the LLM:</strong><br><br>
-                <pre><code>SELECT year, "country (ISO-639-1)", obese
-FROM body_mass_index
-WHERE "country (ISO-639-1)" IN ('DE', 'DK', 'EE', 'FI', 'PL', 'AT')
-ORDER BY year;</code></pre>
-            </td>
-        </tr>
-        <tr>
-            <td>Calculate the minimum, average and maximum percentages of people in 2019 who do only aerobic, only muscle-strengthening and both aerobic and muscle-strengthening exercise and show the result as a bar plot (nine bars overall).</td>
-            <td>
-                <strong>Plotly Figure:</strong><br><br>
-                <img src="imgs/result-query3.png" alt="imgs/result-query3.png" />
-                <hr>
-                <strong>Main SQL query used by the LLM:</strong><br><br>
-                <pre><code>SELECT
-    MIN(aerobic) AS min_aerobic,
-    AVG(aerobic) AS avg_aerobic,
-    MAX(aerobic) AS max_aerobic,
-    MIN("muscle-strengthening") AS min_muscle_strengthening,
-    AVG("muscle-strengthening") AS avg_muscle_strengthening,
-    MAX("muscle-strengthening") AS max_muscle_strengthening,
-    MIN("aerobic and muscle-strengthening") AS min_aerobic_and_strengthening,
-    AVG("aerobic and muscle-strengthening") AS avg_aerobic_and_strengthening,
-    MAX("aerobic and muscle-strengthening") AS max_aerobic_and_strengthening
-FROM health_enhancing_physical_activity
-WHERE year = '2019';</code></pre>
-            </td>
-        </tr>
-        <tr>
-            <td>What are the five countries with most people who in 2014 stated that they have not drunk alcohol in the last year? Plot the result as a bar plot.</td>
-            <td>
-                <strong>Plotly Figure:</strong><br><br>
-                <img src="imgs/result-query4.png" alt="imgs/result-query4.png" />
-                <hr>
-                <strong>Main SQL query used by the LLM:</strong><br><br>
-                <pre><code>SELECT "country (ISO-639-1)", "never or not in the last 12 months"
-FROM alcohol_consumption
-WHERE year = '2014'
-ORDER BY "never or not in the last 12 months" DESC
-LIMIT 5;</code></pre>
-            </td>
-        </tr>
-    </tbody>
-</table>
-<br>
+内置电商数据集（运行 `setup_db.py` 自动生成）：
 
-### Requirements
+| 表名 | 说明 | 数据量 |
+|------|------|--------|
+| customers | 客户信息 | 500条 |
+| categories | 商品类目 | 12个 |
+| products | 商品信息 | 96个 |
+| orders | 订单记录 | ~2500条 |
+| order_items | 订单明细 | ~6000条 |
+| reviews | 商品评价 | ~1000条 |
 
-##### - Python >= 3.10
+## 🚀 快速开始
 
-##### - pip
-  - `langchain`
-  - `langchain-community`
-  - `langchain-openai`
-  - `sqlalchemy`
-  - `pydantic`
-  - `pandas`
-  - `plotly`
+### 1. 克隆项目
+
+```bash
+git clone https://github.com/your-username/sql-assistant.git
+cd sql-assistant
+```
+
+### 2. 安装依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. 配置API Key
+
+在 `.env` 文件中填入你的 SiliconFlow API Key：
+
+```
+SILICONFLOW_API_KEY=sk-xxxxxxxxxxxxxxxx
+```
+
+> 在 [SiliconFlow](https://cloud.siliconflow.cn) 免费注册获取 API Key
+
+### 4. 生成演示数据库
+
+```bash
+python setup_db.py
+```
+
+### 5. 启动应用
+
+```bash
+streamlit run app.py
+```
+
+浏览器自动打开 http://localhost:8501
+
+## 💬 示例问题
+
+```
+分析类
+- 各类目的商品平均价格排名
+- 各VIP等级客户的平均消费金额对比
+- 男性和女性客户的消费差异
+
+趋势类
+- 每月订单数量趋势
+- 最近30天的销售额变化
+
+排名类
+- 销量前10的商品及销售数量
+- 评分最高的5个商品
+
+探索类
+- 哪个城市的客户最多
+- 各支付方式的使用占比
+```
+
+## 📁 项目结构
+
+```
+sql-assistant/
+├── app.py              # Streamlit 主界面
+├── run_sql_agent.py    # 命令行版本
+├── agent_tools.py      # 自定义可视化工具 (Plotly)
+├── config.py           # 配置文件
+├── setup_db.py         # 数据库初始化脚本
+├── requirements.txt    # Python 依赖
+├── .env                # API Key (不提交到Git)
+├── .gitignore
+├── README.md
+└── data/
+    └── ecommerce.db    # SQLite 数据库 (自动生成)
+```
+
+## 🔧 技术栈
+
+| 组件 | 技术 |
+|------|------|
+| LLM | SiliconFlow (Qwen3-8B / DeepSeek-V3) |
+| Agent框架 | LangChain |
+| 前端 | Streamlit |
+| 数据库 | SQLite / SQLAlchemy |
+| 可视化 | Plotly |
+| 语言 | Python 3.10+ |
+
+## 📝 说明
+
+- 本项目为数据科学与大数据技术专业课程项目
+- 基于开源项目 [LangChain-SQL-Agent-for-dynamic-data-visualization](https://github.com/EliasK93/LangChain-SQL-Agent-for-dynamic-data-visualization) 改造
+- 主要改进：接入国产LLM、中文界面、Streamlit Web化、电商数据集、新增饼图工具
+
+## License
+
+MIT
