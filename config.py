@@ -14,10 +14,21 @@ CHROMA_DIR = DATA_DIR / "chroma_db"
 DB_PATH = DATA_DIR / "ecommerce.db"
 DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
 
+# Olist真实数据目录
+OLIST_DATA_DIR = DATA_DIR / "olist"
+
 # 确保目录存在
 DATA_DIR.mkdir(exist_ok=True)
 REPORTS_DIR.mkdir(exist_ok=True)
 CHROMA_DIR.mkdir(exist_ok=True)
+
+# 日志配置
+LOG_PATH = DATA_DIR / "performance.log"
+
+# ──────────────────────────────────────────────
+# 数据源配置
+# ──────────────────────────────────────────────
+USE_CSV_DATA = True  # True=使用真实Olist CSV, False=使用模拟数据
 
 # ──────────────────────────────────────────────
 # LLM 配置 (SiliconFlow - OpenAI 兼容接口)
@@ -35,8 +46,8 @@ database_url = DATABASE_URL
 # ──────────────────────────────────────────────
 # Agent 配置
 # ──────────────────────────────────────────────
-agent_max_iterations = 15
-agent_max_execution_time = 60
+agent_max_iterations = 8
+agent_max_execution_time = 30
 
 # ──────────────────────────────────────────────
 # RFM 分析配置

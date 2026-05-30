@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from config import DB_PATH, REPORTS_DIR
+from utils.timing import get_perf_logger, TimerContext
 
 
 class ReportGenerator:
@@ -236,7 +237,9 @@ class ReportGenerator:
 
     def generate_all_reports(self) -> list:
         """生成所有分析报告"""
-        print("[REPORT] 开始生成分析报告...")
+        perf = get_perf_logger()
+        with TimerContext("report_all", perf):
+            print("[REPORT] 开始生成分析报告...")
 
         reports = []
 

@@ -109,7 +109,7 @@ class TestETLPipeline:
 
     def test_pipeline_creates_database(self, temp_db):
         from etl.pipeline import ETLPipeline
-        pipeline = ETLPipeline(db_path=temp_db)
+        pipeline = ETLPipeline(db_path=temp_db, use_csv=False)
         pipeline.run(n_customers=50, n_orders=100, n_products=30, n_sellers=10)
 
         # 验证数据库存在
@@ -130,7 +130,7 @@ class TestETLPipeline:
 
     def test_pipeline_data_integrity(self, temp_db):
         from etl.pipeline import ETLPipeline
-        pipeline = ETLPipeline(db_path=temp_db)
+        pipeline = ETLPipeline(db_path=temp_db, use_csv=False)
         pipeline.run(n_customers=50, n_orders=100, n_products=30, n_sellers=10)
 
         conn = sqlite3.connect(temp_db)

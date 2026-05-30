@@ -20,6 +20,9 @@ from config import (
     siliconflow_api_key, llm_base_url, llm_model_id, llm_temperature,
     agent_max_execution_time, agent_max_iterations, database_url, DB_PATH
 )
+from utils.timing import get_perf_logger, TimerContext, log_user_action
+
+perf_logger = get_perf_logger()
 
 # ──────────────────────────────────────────────
 # 页面配置
@@ -82,6 +85,7 @@ def render_sidebar():
              "Pro/deepseek-ai/DeepSeek-R1"],
             index=0
         )
+        log_user_action("select_model", model)
 
         st.divider()
 
@@ -133,24 +137,25 @@ def render_sidebar():
 def init_db(db_url):
     from langchain_community.utilities import SQLDatabase
     from sqlalchemy import create_engine
-    engine = create_engine(db_url)
-    return SQLDatabase(engine=engine)
+    with TimerContext("init_db", perf_logger):
+        engine = create_engine(db_url)
+        return SQLDatabase(engine=engine)
 
 
 @st.cache_resource
 def init_llm(key, model_id):
     from langchain_openai import ChatOpenAI
-    # Qwen3模型需要关闭thinking模式，否则openai-tools agent返回空结果
-    extra_kwargs = {}
-    if "Qwen3" in model_id:
-        extra_kwargs["extra_body"] = {"enable_thinking": False}
-    return ChatOpenAI(
-        model=model_id,
-        temperature=llm_temperature,
-        openai_api_base=llm_base_url,
-        openai_api_key=key,
-        **extra_kwargs,
-    )
+    with TimerContext("init_llm", perf_logger):
+        extra_kwargs = {}
+        if "Qwen3" in model_id:
+            extra_kwargs["extra_body"] = {"enable_thinking": False}
+        return ChatOpenAI(
+            model=model_id,
+            temperature=llm_temperature,
+            openai_api_base=llm_base_url,
+            openai_api_key=key,
+            **extra_kwargs,
+        )
 
 
 @st.cache_resource
@@ -158,26 +163,33 @@ def init_sql_agent(_db, _llm):
     import agent_tools
     from langchain_community.agent_toolkits import create_sql_agent
 
-    extra_tools = [
-        agent_tools.output_bar_plot,
-        agent_tools.output_time_series_plot,
-        agent_tools.output_table,
-        agent_tools.output_pie_plot,
-    ]
-    prefix = """你是一个电商数据智能分析助手。你可以查询SQLite数据库中的电商数据，也可以用可视化工具生成图表。
+    with TimerContext("init_sql_agent", perf_logger):
+        extra_tools = [
+            agent_tools.output_bar_plot,
+            agent_tools.output_time_series_plot,
+            agent_tools.output_table,
+            agent_tools.output_pie_plot,
+            agent_tools.preset_query,
+            agent_tools.auto_visualize,
+            agent_tools.query_and_visualize,
+        ]
+        prefix = """你是电商数据分析助手。
 
-规则：
-- 如果用户的问题可以通过查询数据库回答，请先查询数据库再回答
-- 如果用户问的是与数据库无关的通用问题（如"你是谁"、"你好"等），请直接回答，不需要查询数据库
-- 如果用户要求可视化，请使用可视化工具（output_bar_plot、output_time_series_plot、output_pie_plot、output_table）生成图表
-- 可视化工具接受JSON字符串或字典格式的数据，例如 {{"月份": ["1月","2月"], "数量": [100, 200]}}"""
-    return create_sql_agent(
-        _llm, db=_db, agent_type="tool-calling",
-        max_iterations=agent_max_iterations,
-        max_execution_time=agent_max_execution_time,
-        extra_tools=extra_tools, verbose=True,
-        prefix=prefix,
-    )
+【严格规则】
+- 通用问题（自我介绍、闲聊、问候、能力说明）：直接用文字回答，禁止调用任何工具
+- 数据分析问题（涉及具体数据查询、图表生成）：才调用工具
+
+数据查询可用: monthly_revenue, category_top10, city_distribution, payment_analysis, delivery_performance, review_correlation, seller_top10, repeat_purchase, rfm_summary, order_status, freight_analysis, installment_analysis, weekday_orders, state_revenue, customer_lifetime
+消费频率/购买次数/复购 → repeat_purchase
+如果没有匹配的预置查询，用SQL+auto_visualize
+回答必须包含具体数字，不能只给定性描述"""
+        return create_sql_agent(
+            _llm, db=_db, agent_type="tool-calling",
+            max_iterations=agent_max_iterations,
+            max_execution_time=agent_max_execution_time,
+            extra_tools=extra_tools, verbose=True,
+            prefix=prefix,
+        )
 
 
 # ──────────────────────────────────────────────
@@ -199,10 +211,11 @@ def main():
     sql_agent = None
     if api_key and os.path.exists(str(DB_PATH)):
         try:
-            db = init_db(database_url)
-            llm = init_llm(api_key, model)
-            sql_agent = init_sql_agent(db, llm)
-            st.session_state["sql_agent"] = sql_agent
+            with TimerContext("main_agent_setup_total", perf_logger):
+                db = init_db(database_url)
+                llm = init_llm(api_key, model)
+                sql_agent = init_sql_agent(db, llm)
+                st.session_state["sql_agent"] = sql_agent
         except Exception as e:
             st.sidebar.error(f"Agent初始化失败: {e}")
 

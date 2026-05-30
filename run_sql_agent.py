@@ -8,6 +8,9 @@ from config import (
     siliconflow_api_key, llm_base_url, llm_model_id, llm_temperature,
     agent_max_execution_time, agent_max_iterations, database_url
 )
+from utils.timing import get_perf_logger, TimerContext
+
+perf = get_perf_logger()
 
 
 def load_sql_database() -> SQLDatabase:
@@ -33,14 +36,19 @@ def load_llm() -> ChatOpenAI:
 def load_sql_agent(db: SQLDatabase, llm: ChatOpenAI):
     """创建 LangChain SQL Agent"""
     extra_tools = [agent_tools.output_bar_plot, agent_tools.output_time_series_plot,
-                   agent_tools.output_table, agent_tools.output_pie_plot]
-    prefix = """你是一个电商数据智能分析助手。你可以查询SQLite数据库中的电商数据，也可以用可视化工具生成图表。
+                   agent_tools.output_table, agent_tools.output_pie_plot,
+                   agent_tools.preset_query, agent_tools.auto_visualize,
+                   agent_tools.query_and_visualize]
+    prefix = """你是电商数据分析助手。
 
-规则：
-- 如果用户的问题可以通过查询数据库回答，请先查询数据库再回答
-- 如果用户问的是与数据库无关的通用问题（如"你是谁"、"你好"等），请直接回答，不需要查询数据库
-- 如果用户要求可视化，请使用可视化工具（output_bar_plot、output_time_series_plot、output_pie_plot、output_table）生成图表
-- 可视化工具接受JSON字符串或字典格式的数据，例如 {"月份": ["1月","2月"], "数量": [100, 200]}"""
+【严格规则】
+- 通用问题（自我介绍、闲聊、问候、能力说明）：直接用文字回答，禁止调用任何工具
+- 数据分析问题（涉及具体数据查询、图表生成）：才调用工具
+
+数据查询可用: monthly_revenue, category_top10, city_distribution, payment_analysis, delivery_performance, review_correlation, seller_top10, repeat_purchase, rfm_summary, order_status, freight_analysis, installment_analysis, weekday_orders, state_revenue, customer_lifetime
+消费频率/购买次数/复购 → repeat_purchase
+如果没有匹配的预置查询，用SQL+auto_visualize
+回答必须包含具体数字，不能只给定性描述"""
     return create_sql_agent(
         llm, db=db, agent_type="tool-calling",
         max_iterations=agent_max_iterations,
@@ -51,22 +59,27 @@ def load_sql_agent(db: SQLDatabase, llm: ChatOpenAI):
 
 
 if __name__ == '__main__':
-    db = load_sql_database()
+    with TimerContext("cli_load_db", perf):
+        db = load_sql_database()
     print("数据库表:", db.get_usable_table_names())
 
-    llm = load_llm()
-    sql_agent = load_sql_agent(db, llm)
+    with TimerContext("cli_load_llm", perf):
+        llm = load_llm()
+
+    with TimerContext("cli_load_agent", perf):
+        sql_agent = load_sql_agent(db, llm)
 
     # 测试查询
     test_queries = [
         "每个城市的客户数量是多少？用柱状图展示",
         "各类目的商品平均价格是多少？",
-        "最近30天销量前10的商品是哪些？",
-        "各VIP等级客户的平均消费金额对比",
+        "用preset_query查看月度收入趋势",
+        "用preset_query查看RFM分群概览",
     ]
-    for query in test_queries:
+    for i, query in enumerate(test_queries):
         print(f"\n{'='*60}")
         print(f"问题: {query}")
         print(f"{'='*60}")
-        answer = sql_agent.invoke({"input": query})["output"]
+        with TimerContext(f"cli_query_{i}", perf):
+            answer = sql_agent.invoke({"input": query})["output"]
         print(answer)

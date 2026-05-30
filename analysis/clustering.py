@@ -1,5 +1,10 @@
 """
 KMeans聚类分析模块 - 基于RFM指标进行用户聚类
+
+增强版:
+- Log1p 变换后 StandardScaler
+- 双指标选K: 肘部法 + 轮廓系数
+- 聚类画像含策略建议
 """
 import sqlite3
 
@@ -7,15 +12,18 @@ import numpy as np
 import pandas as pd
 
 from config import DB_PATH
+from utils.timing import get_perf_logger, TimerContext
 
 
 class RFMClustering:
-    """基于KMeans的RFM聚类分析"""
+    """基于KMeans的RFM聚类分析（增强版）"""
 
     def __init__(self, db_path: str = None):
         self.db_path = db_path or str(DB_PATH)
         self.scaler = None
         self.kmeans = None
+        self.inertias = []
+        self.silhouettes = []
 
     def _load_rfm_data(self) -> pd.DataFrame:
         """加载RFM数据"""
@@ -25,29 +33,43 @@ class RFMClustering:
         return df
 
     def _find_optimal_k(self, scaled_data: np.ndarray, max_k: int = 10) -> int:
-        """使用肘部法则确定最优K值（最少3个聚类以保证分析有意义）"""
+        """使用肘部法 + 轮廓系数确定最优K值"""
+        from sklearn.cluster import KMeans
+        from sklearn.metrics import silhouette_score
+
         max_k = min(max_k, len(scaled_data) - 1, 10)
         if max_k < 3:
             return 3
 
-        inertias = []
+        self.inertias = []
+        self.silhouettes = []
         K_range = range(2, max_k + 1)
 
-        from sklearn.cluster import KMeans
         for k in K_range:
             km = KMeans(n_clusters=k, random_state=42, n_init=10)
-            km.fit(scaled_data)
-            inertias.append(km.inertia_)
+            labels = km.fit_predict(scaled_data)
+            self.inertias.append(km.inertia_)
+            self.silhouettes.append(silhouette_score(scaled_data, labels))
 
-        # 计算肘部点（二阶差分最大）
-        if len(inertias) >= 3:
-            diffs = np.diff(inertias)
+        # 肘部法: 二阶差分最大
+        if len(self.inertias) >= 3:
+            diffs = np.diff(self.inertias)
             diff2 = np.diff(diffs)
-            optimal_k = list(K_range)[np.argmax(diff2) + 1]
+            elbow_k = list(K_range)[np.argmax(diff2) + 1]
         else:
-            optimal_k = 4
+            elbow_k = 4
 
-        # 保证最少3个聚类，使RFM分析有实际意义
+        # 轮廓系数: 最大值对应的K
+        silhouette_k = list(K_range)[np.argmax(self.silhouettes)]
+
+        # 综合决策: 如果两个指标一致，直接采用；否则优先轮廓系数
+        if elbow_k == silhouette_k:
+            optimal_k = elbow_k
+        else:
+            optimal_k = silhouette_k
+            print(f"  [INFO] 肘部法建议K={elbow_k}, 轮廓系数建议K={silhouette_k}, 采用轮廓系数")
+
+        # 保证最少3个聚类
         return max(3, optimal_k)
 
     def cluster(self, n_clusters: int = None) -> pd.DataFrame:
@@ -60,42 +82,46 @@ class RFMClustering:
         Returns:
             DataFrame: 添加了聚类标签的RFM数据
         """
-        print("[CLUSTER] 开始KMeans聚类分析...")
-        df = self._load_rfm_data()
+        perf = get_perf_logger()
+        with TimerContext("kmeans_cluster", perf):
+            print("[CLUSTER] 开始KMeans聚类分析...")
+            df = self._load_rfm_data()
 
-        if len(df) < 10:
-            print("  [WARN] 数据量不足，跳过聚类")
-            df["cluster_label"] = 0
+            if len(df) < 10:
+                print("  [WARN] 数据量不足，跳过聚类")
+                df["cluster_label"] = 0
+                return df
+
+            # Log1p 变换 + StandardScaler
+            from sklearn.preprocessing import StandardScaler
+            from sklearn.cluster import KMeans
+
+            rfm_features = df[["recency", "frequency", "monetary"]].values
+            rfm_log = np.log1p(rfm_features)
+            self.scaler = StandardScaler()
+            scaled = self.scaler.fit_transform(rfm_log)
+
+            # 确定聚类数量
+            if n_clusters is None:
+                n_clusters = self._find_optimal_k(scaled)
+            n_clusters = max(2, min(n_clusters, 8))
+
+            print(f"  [INFO] 聚类数量: {n_clusters}")
+
+            # 执行KMeans
+            self.kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            df["cluster_label"] = self.kmeans.fit_predict(scaled)
+
+            # 生成聚类画像
+            cluster_profiles = self._generate_cluster_profiles(df)
+            print(f"\n  聚类画像:")
+            for profile in cluster_profiles:
+                print(f"    群体{profile['cluster']}: {profile['description']}")
+
+            # 保存聚类结果到数据库
+            self._save_cluster_labels(df)
+
             return df
-
-        # 标准化RFM指标
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.cluster import KMeans
-        self.scaler = StandardScaler()
-        rfm_features = df[["recency", "frequency", "monetary"]].values
-        scaled = self.scaler.fit_transform(rfm_features)
-
-        # 确定聚类数量
-        if n_clusters is None:
-            n_clusters = self._find_optimal_k(scaled)
-        n_clusters = max(2, min(n_clusters, 8))
-
-        print(f"  [INFO] 聚类数量: {n_clusters}")
-
-        # 执行KMeans
-        self.kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        df["cluster_label"] = self.kmeans.fit_predict(scaled)
-
-        # 生成聚类画像
-        cluster_profiles = self._generate_cluster_profiles(df)
-        print(f"\n  聚类画像:")
-        for profile in cluster_profiles:
-            print(f"    群体{profile['cluster']}: {profile['description']}")
-
-        # 保存聚类结果到数据库
-        self._save_cluster_labels(df)
-
-        return df
 
     def _generate_cluster_profiles(self, df: pd.DataFrame) -> list:
         """生成聚类画像描述"""
@@ -162,10 +188,22 @@ class RFMClustering:
         if self.kmeans is None:
             return pd.DataFrame()
 
-        centers = self.scaler.inverse_transform(self.kmeans.cluster_centers_)
+        # 逆变换: StandardScaler逆 -> expm1逆log1p
+        centers_scaled = self.kmeans.cluster_centers_
+        centers_log = self.scaler.inverse_transform(centers_scaled)
+        centers = np.expm1(centers_log)  # 逆log1p变换
+
         return pd.DataFrame(
             centers, columns=["recency", "frequency", "monetary"]
         ).round(2)
+
+    def get_selection_metrics(self) -> dict:
+        """获取K选择指标（用于可视化）"""
+        return {
+            "k_range": list(range(2, 2 + len(self.inertias))),
+            "inertias": self.inertias,
+            "silhouettes": self.silhouettes,
+        }
 
 
 if __name__ == "__main__":

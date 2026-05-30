@@ -73,6 +73,10 @@ class DataLoader:
                 order_estimated_delivery_date TEXT,
                 total_price REAL,
                 total_freight REAL,
+                delivery_time_days REAL,
+                delay_vs_estimate REAL,
+                shipping_time REAL,
+                order_value_category TEXT,
                 FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
             );
 
@@ -85,6 +89,7 @@ class DataLoader:
                 shipping_limit_date TEXT,
                 price REAL,
                 freight_value REAL,
+                items_per_order INTEGER,
                 PRIMARY KEY (order_id, order_item_id),
                 FOREIGN KEY (order_id) REFERENCES orders(order_id),
                 FOREIGN KEY (product_id) REFERENCES products(product_id),
