@@ -145,12 +145,6 @@ sql-assistant/
 | 可视化 | Plotly |
 | 语言 | Python 3.10+ |
 
-## 📝 说明
-
-- 本项目为数据科学与大数据技术专业课程项目
-- 基于开源项目 [LangChain-SQL-Agent-for-dynamic-data-visualization](https://github.com/EliasK93/LangChain-SQL-Agent-for-dynamic-data-visualization) 改造
-- 主要改进：接入国产LLM、中文界面、Streamlit Web化、电商数据集、新增饼图工具
-
 ## License
 
 MIT
