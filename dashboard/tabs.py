@@ -12,6 +12,25 @@ from config import DB_PATH
 from utils.timing import get_perf_logger, TimerContext, read_recent_logs, log_user_action
 
 
+def _get_connection(db_path: str) -> sqlite3.Connection:
+    """获取优化配置的SQLite连接"""
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-64000")      # 64MB
+    conn.execute("PRAGMA temp_store=MEMORY")
+    return conn
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_query(db_path: str, sql: str, params=None) -> pd.DataFrame:
+    """带缓存的SQL查询（5分钟TTL）"""
+    conn = _get_connection(db_path)
+    df = pd.read_sql_query(sql, conn, params=params)
+    conn.close()
+    return df
+
+
 class TabRenderer:
     """仪表盘标签页渲染器"""
 
@@ -21,12 +40,9 @@ class TabRenderer:
         self.perf = get_perf_logger()
 
     def _query(self, sql: str, params=None) -> pd.DataFrame:
-        """执行SQL查询"""
+        """执行SQL查询（带缓存）"""
         with TimerContext("db_query", self.perf):
-            conn = sqlite3.connect(self.db_path)
-            df = pd.read_sql_query(sql, conn, params=params)
-            conn.close()
-            return df
+            return _cached_query(self.db_path, sql, params)
 
     def render_overview(self):
         """Tab1 - 数据概览"""
@@ -187,7 +203,9 @@ class TabRenderer:
     def _render_rfm_impl(self):
         st.header("🔬 RFM客户分析")
 
-        rfm = self._query("SELECT * FROM rfm_results")
+        rfm = self._query(
+            "SELECT customer_id, recency, frequency, monetary, segment, cluster_label FROM rfm_results"
+        )
         if rfm.empty:
             st.warning("暂无RFM数据，请先运行ETL和RFM分析。")
             return
@@ -773,8 +791,10 @@ class TabRenderer:
 
                 try:
                     with st.spinner("🔍 正在检索知识库并生成回答..."):
+                        # 简单问题跳过 RAG-Fusion（省2次LLM调用，~8秒）
+                        is_simple = len(query) < 20 and "？" not in query and "?" not in query
                         with TimerContext("rag_query_total", self.perf):
-                            answer = rag.query(query)
+                            answer = rag.query(query, use_fusion=not is_simple)
                         st.session_state.rag_messages.append({"role": "assistant", "content": answer})
                 except Exception as e:
                     err_str = str(e)

@@ -85,7 +85,11 @@ def render_sidebar():
              "Pro/deepseek-ai/DeepSeek-R1"],
             index=0
         )
-        log_user_action("select_model", model)
+        # 仅在模型真正变化时记录日志（避免同一值重复触发）
+        prev_model = st.session_state.get("_prev_model")
+        if model != prev_model:
+            st.session_state["_prev_model"] = model
+            log_user_action("select_model", model)
 
         st.divider()
 
@@ -224,25 +228,41 @@ def main():
         st.warning("⚠️ 数据库未初始化，请先执行ETL Pipeline生成数据。")
         st.info("👉 点击上方 **ETL管理** 标签页，然后点击 **执行ETL Pipeline** 按钮。")
 
-    # 四个标签页
+    # 四个标签页（@st.fragment 懒加载：非活跃标签页不执行）
     from dashboard.tabs import TabRenderer
     renderer = TabRenderer()
+
+    @st.fragment
+    def tab_overview():
+        renderer.render_overview()
+
+    @st.fragment
+    def tab_rfm():
+        renderer.render_rfm()
+
+    @st.fragment
+    def tab_qa():
+        renderer.render_qa()
+
+    @st.fragment
+    def tab_etl():
+        renderer.render_etl()
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 数据概览", "🔬 RFM分析", "💬 智能问答", "⚙️ ETL管理"
     ])
 
     with tab1:
-        renderer.render_overview()
+        tab_overview()
 
     with tab2:
-        renderer.render_rfm()
+        tab_rfm()
 
     with tab3:
-        renderer.render_qa()
+        tab_qa()
 
     with tab4:
-        renderer.render_etl()
+        tab_etl()
 
     # 页脚
     st.divider()
